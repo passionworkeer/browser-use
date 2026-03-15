@@ -295,7 +295,10 @@ async def stop_tunnel(port: int) -> dict[str, Any]:
 
 	url = info['url']
 	pid = info['pid']
-	_kill_process(pid)
+	# Check if process was successfully killed - if not, it may still be running
+	killed = _kill_process(pid)
+	if not killed:
+		logger.warning(f'Process {pid} may still be running after termination attempt for port {port}')
 	_delete_tunnel_info(port)
 	# Clean up log file
 	log_file = _TUNNELS_DIR / f'{port}.log'
