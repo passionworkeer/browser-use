@@ -123,7 +123,7 @@ def kill_orphaned_server(session: str) -> bool:
 	file but didn't kill the old process).
 
 	Returns:
-		True if an orphan was found and killed.
+		True if an orphan was found and killed successfully.
 	"""
 	pid_path = get_pid_path(session)
 	if not pid_path.exists():
@@ -140,12 +140,36 @@ def kill_orphaned_server(session: str) -> bool:
 			# Kill the orphaned process
 			if sys.platform == 'win32':
 				import ctypes
+				from ctypes import wintypes
 
 				PROCESS_TERMINATE = 1
-				handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+				ERROR_ACCESS_DENIED = 5
+				ERROR_PRIVILEGE_NOT_HELD = 1314
+				ERROR_INVALID_PARAMETER = 87
+
+				kernel32 = ctypes.windll.kernel32
+				kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+				kernel32.OpenProcess.restype = wintypes.HANDLE
+				kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+				kernel32.TerminateProcess.restype = wintypes.BOOL
+				kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+				kernel32.CloseHandle.restype = wintypes.BOOL
+				kernel32.GetLastError.restype = wintypes.DWORD
+
+				handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
 				if handle:
-					ctypes.windll.kernel32.TerminateProcess(handle, 1)
-					ctypes.windll.kernel32.CloseHandle(handle)
+					success = kernel32.TerminateProcess(handle, 1)
+					kernel32.CloseHandle(handle)
+					# Check if termination actually succeeded
+					if not success:
+						err = kernel32.GetLastError()
+						# Access denied or privilege not held means process exists but we can't kill it
+						# This is still considered "exists" but we failed to kill it
+						if err in (ERROR_ACCESS_DENIED, ERROR_PRIVILEGE_NOT_HELD):
+							return False  # Process exists but we can't kill it
+						# Other errors - likely process doesn't exist anymore
+						cleanup_session_files(session)
+						return False
 			else:
 				os.kill(pid, signal.SIGKILL)
 			return True

@@ -158,13 +158,30 @@ def _pid_exists(pid: int) -> bool:
 	"""
 	if sys.platform == 'win32':
 		import ctypes
+		from ctypes import wintypes
 
 		PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-		handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+		ERROR_ACCESS_DENIED = 5
+		ERROR_PRIVILEGE_NOT_HELD = 1314
+		ERROR_INVALID_PARAMETER = 87
+
+		kernel32 = ctypes.windll.kernel32
+		kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+		kernel32.OpenProcess.restype = wintypes.HANDLE
+		kernel32.GetLastError.restype = wintypes.DWORD
+		kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+		kernel32.CloseHandle.restype = wintypes.BOOL
+
+		handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
 		if handle:
-			ctypes.windll.kernel32.CloseHandle(handle)
+			kernel32.CloseHandle(handle)
 			return True
-		return False
+		# Check error code - access denied or privilege not held means process exists but we can't access it
+		# Invalid parameter means process doesn't exist
+		err = kernel32.GetLastError()
+		if err in (ERROR_ACCESS_DENIED, ERROR_PRIVILEGE_NOT_HELD):
+			return True  # Process exists but we can't access it
+		return False  # Process doesn't exist (ERROR_INVALID_PARAMETER or other)
 	else:
 		try:
 			os.kill(pid, 0)
