@@ -2556,7 +2556,8 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 				if self.state.paused:
 					self.logger.debug(f'⏸️ Step {self.state.n_steps}: Agent paused, waiting to resume...')
 					await self._external_pause_event.wait()
-					signal_handler.reset()
+					if signal_handler is not None:
+						signal_handler.reset()
 
 				# Check if we should stop due to too many failures, if final_response_after_failure is True, we try one last time
 				if (self.state.consecutive_failures) >= self.settings.max_failures + int(
