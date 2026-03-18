@@ -160,18 +160,29 @@ def kill_orphaned_server(session: str) -> bool:
 				if handle:
 					success = kernel32.TerminateProcess(handle, 1)
 					kernel32.CloseHandle(handle)
-					# Check if termination actually succeeded
-					if not success:
-						err = kernel32.GetLastError()
-						# Access denied or privilege not held means process exists but we can't kill it
-						# This is still considered "exists" but we failed to kill it
-						if err in (ERROR_ACCESS_DENIED, ERROR_PRIVILEGE_NOT_HELD):
-							return False  # Process exists but we can't kill it
-						# Other errors - likely process doesn't exist anymore
+					# If termination succeeded, trust the OS and clean up
+					# Note: _pid_exists() check immediately after kill can produce false negatives
+					# (process still appears to exist due to OS timing), so we skip the check
+					if success:
 						cleanup_session_files(session)
-						return False
+						return True
+					# Check if termination actually failed
+					err = kernel32.GetLastError()
+					# Access denied or privilege not held means process exists but we can't kill it
+					# This is still considered "exists" but we failed to kill it
+					if err in (ERROR_ACCESS_DENIED, ERROR_PRIVILEGE_NOT_HELD):
+						return False  # Process exists but we can't kill it
+					# Other errors - process likely doesn't exist anymore but we couldn't kill it
+					# Don't clean up - the process may still be alive
+					return False
 			else:
-				os.kill(pid, signal.SIGKILL)
+				# OpenProcess failed (e.g., access denied) - don't clean up
+				# The process may still be alive and holding the port
+				return False
+		else:
+			os.kill(pid, signal.SIGKILL)
+			# Trust the signal was delivered successfully
+			cleanup_session_files(session)
 			return True
 	except (OSError, ValueError):
 		pass
