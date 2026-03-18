@@ -140,20 +140,35 @@ def kill_orphaned_server(session: str) -> bool:
 			# Kill the orphaned process
 			if sys.platform == 'win32':
 				import ctypes
+				from ctypes import wintypes
+
+				kernel32 = ctypes.windll.kernel32
+				kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+				kernel32.OpenProcess.restype = wintypes.HANDLE
+				kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+				kernel32.TerminateProcess.restype = wintypes.BOOL
+				kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+				kernel32.CloseHandle.restype = wintypes.BOOL
 
 				PROCESS_TERMINATE = 1
-				handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
-				if handle:
-					ctypes.windll.kernel32.TerminateProcess(handle, 1)
-					ctypes.windll.kernel32.CloseHandle(handle)
+				handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+				if not handle:
+					# OpenProcess failed - don't clean up, process may still be alive
+					return False
+				result = kernel32.TerminateProcess(handle, 1)
+				kernel32.CloseHandle(handle)
+				if not result:
+					# TerminateProcess failed - don't clean up, process may still be alive
+					return False
 			else:
 				os.kill(pid, signal.SIGKILL)
+
+			# Only clean up if we successfully killed the process
+			cleanup_session_files(session)
 			return True
 	except (OSError, ValueError):
 		pass
 
-	# Clean up stale files even if we couldn't kill (process may be gone)
-	cleanup_session_files(session)
 	return False
 
 
