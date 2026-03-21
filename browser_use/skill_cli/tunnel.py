@@ -6,9 +6,12 @@ Cloudflared must be installed via install.sh or manually by the user.
 Tunnels are managed independently of browser sessions - they are purely
 a network utility for exposing local ports via Cloudflare quick tunnels.
 
-Tunnels survive CLI process exit by:
-1. Spawning cloudflared as a daemon (start_new_session=True)
-2. Tracking tunnel info via PID files in ~/.browser-use/tunnels/
+Tunnels survive CLI process exit by spawning cloudflared as a daemon and
+tracking tunnel info via PID files in ~/.browser-use/tunnels/:
+
+- Unix:  Uses start_new_session=True to detach from the parent process group.
+- Windows: Uses creationflags=CREATE_NEW_PROCESS_GROUP|CREATE_NO_WINDOW
+  to create a detached process without a console window.
 """
 
 import asyncio
@@ -157,20 +160,35 @@ def _is_process_alive(pid: int) -> bool:
 
 def _kill_process(pid: int) -> bool:
 	"""Kill a process by PID. Returns True if killed, False if already dead."""
-	try:
-		os.kill(pid, signal.SIGTERM)
-		# Give it a moment to terminate gracefully
-		for _ in range(10):
-			if not _is_process_alive(pid):
-				return True
-			import time
+	import sys
 
-			time.sleep(0.1)
-		# Force kill if still alive
-		os.kill(pid, signal.SIGKILL)
-		return True
-	except (OSError, ProcessLookupError):
-		return False
+	if sys.platform == 'win32':
+		import ctypes
+
+		PROCESS_TERMINATE = 0x0001
+		handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+		if not handle:
+			return False
+		try:
+			ctypes.windll.kernel32.TerminateProcess(handle, 1)
+			return True
+		finally:
+			ctypes.windll.kernel32.CloseHandle(handle)
+	else:
+		try:
+			os.kill(pid, signal.SIGTERM)
+			# Give it a moment to terminate gracefully
+			for _ in range(10):
+				if not _is_process_alive(pid):
+					return True
+				import time
+
+				time.sleep(0.1)
+			# Force kill if still alive
+			os.kill(pid, signal.SIGKILL)
+			return True
+		except (OSError, ProcessLookupError):
+			return False
 
 
 # =============================================================================
@@ -207,17 +225,32 @@ async def start_tunnel(port: int) -> dict[str, Any]:
 	log_file = open(log_file_path, 'w')  # noqa: ASYNC230
 
 	# Spawn cloudflared as a daemon
-	# - start_new_session=True: survives parent exit
+	# - Unix: start_new_session=True survives parent exit
+	# - Windows: creationflags=CREATE_NEW_PROCESS_GROUP|CREATE_NO_WINDOW
+	#   creates a detached process without a console window
 	# - stderr to file: avoids SIGPIPE when parent's pipe closes
-	process = await asyncio.create_subprocess_exec(
-		cloudflared_binary,
-		'tunnel',
-		'--url',
-		f'http://localhost:{port}',
-		stdout=asyncio.subprocess.DEVNULL,
-		stderr=log_file,
-		start_new_session=True,
-	)
+	import sys
+
+	if sys.platform == 'win32':
+		process = await asyncio.create_subprocess_exec(
+			cloudflared_binary,
+			'tunnel',
+			'--url',
+			f'http://localhost:{port}',
+			stdout=asyncio.subprocess.DEVNULL,
+			stderr=log_file,
+			creationflags=0x00000200 | 0x08000000,  # CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+		)
+	else:
+		process = await asyncio.create_subprocess_exec(
+			cloudflared_binary,
+			'tunnel',
+			'--url',
+			f'http://localhost:{port}',
+			stdout=asyncio.subprocess.DEVNULL,
+			stderr=log_file,
+			start_new_session=True,
+		)
 
 	# Poll the log file until we find the tunnel URL
 	url: str | None = None
