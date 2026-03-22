@@ -164,6 +164,9 @@ def _kill_process(pid: int) -> bool:
 		from ctypes import wintypes
 
 		PROCESS_TERMINATE = 0x0001
+		WAIT_TIMEOUT = 0x00000102
+		INFINITE = 0xFFFFFFFF
+
 		TerminateProcess = ctypes.windll.kernel32.TerminateProcess
 		TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
 		TerminateProcess.restype = wintypes.BOOL
@@ -172,20 +175,19 @@ def _kill_process(pid: int) -> bool:
 		OpenProcess = ctypes.windll.kernel32.OpenProcess
 		OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
 		OpenProcess.restype = wintypes.HANDLE
+		WaitForSingleObject = ctypes.windll.kernel32.WaitForSingleObject
+		WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+		WaitForSingleObject.restype = wintypes.DWORD
 
 		handle = OpenProcess(PROCESS_TERMINATE, False, pid)
 		if handle:
 			success = TerminateProcess(handle, 1)
 			if success:
-				# Wait up to ~1s for the process to actually exit, mirroring non-Windows behavior
-				for _ in range(10):
-					if not _is_process_alive(pid):
-						CloseHandle(handle)
-						return True
-					time.sleep(0.1)
-				# Process still alive after timeout
+				# Wait up to 1s for the process to actually exit using WaitForSingleObject
+				wait_result = WaitForSingleObject(handle, 1000)  # 1000ms = 1s timeout
 				CloseHandle(handle)
-				return False
+				# WAIT_TIMEOUT means process still alive after timeout; any other non-FAIL result means it exited
+				return wait_result != WAIT_TIMEOUT
 			CloseHandle(handle)
 			return False
 		return False
