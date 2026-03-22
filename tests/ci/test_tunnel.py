@@ -1,6 +1,7 @@
 """Tests for tunnel module - cloudflared binary management."""
 
-from unittest.mock import patch
+import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -89,8 +90,6 @@ def test_get_tunnel_manager_singleton():
 # =============================================================================
 # Tests for _kill_process
 # =============================================================================
-import sys
-from unittest.mock import MagicMock
 
 
 def _create_windows_mocks():
@@ -205,7 +204,8 @@ class TestKillProcessWindows:
 				return call_count[0] <= 3
 
 			with patch('browser_use.skill_cli.tunnel._is_process_alive', side_effect=fake_is_alive):
-				result = _kill_process(1234)
+				with patch('browser_use.skill_cli.tunnel.time.sleep'):
+					result = _kill_process(1234)
 
 			assert result is True
 			assert call_count[0] == 4  # 3 alive checks + 1 exit
@@ -327,7 +327,8 @@ class TestKillProcessUnix:
 
 			with patch('os.kill') as mock_kill:
 				with patch('browser_use.skill_cli.tunnel._is_process_alive', side_effect=fake_is_alive):
-					result = _kill_process(1234)
+					with patch('browser_use.skill_cli.tunnel.time.sleep'):
+						result = _kill_process(1234)
 
 			assert result is True
 			# Should have sent SIGTERM first, then SIGKILL after 10 sleeps
