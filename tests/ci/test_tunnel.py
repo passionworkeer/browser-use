@@ -92,43 +92,33 @@ def test_get_tunnel_manager_singleton():
 # =============================================================================
 
 
-def _create_windows_mocks():
-	"""Create mock objects for Windows ctypes.windll.
+class _FakeCtypes:
+	"""Fake ctypes-like object with a mock windll for testing Windows code on any platform.
 
-	Returns None if ctypes.windll is not available (non-Windows platform).
+	This avoids relying on the real ctypes.windll (which only exists on Windows),
+	allowing the Windows _kill_process code paths to be tested on Linux/Mac CI.
 	"""
-	try:
-		import ctypes
-	except ImportError:
-		return None
 
-	# Check if windll is available (only on Windows)
-	if not hasattr(ctypes, 'windll'):
-		return None
+	def __init__(self):
+		self.windll = MagicMock()
 
-	return ctypes
+
+def _make_fake_ctypes() -> _FakeCtypes:
+	"""Return a fully-isolated fake ctypes object with mock windll."""
+	return _FakeCtypes()
 
 
 class TestKillProcessWindows:
 	"""Tests for _kill_process on Windows.
 
-	These tests mock Windows-specific ctypes to allow running on non-Windows platforms.
-	The mocking ensures ctypes.windll is only accessed when the platform is explicitly
-	set to win32, preventing AttributeError on non-Windows systems.
+	These tests run on ALL platforms (Linux/Mac/Windows) by patching sys.platform
+	to 'win32' and injecting a fake ctypes.windll. This ensures the Windows code
+	path is exercised in normal (non-Windows) CI runs.
 	"""
 
 	@staticmethod
 	def test_kill_process_windows_success_exits_immediately():
 		"""Test Windows path: TerminateProcess succeeds and process exits immediately."""
-		# Guard: require Windows platform for these tests
-		if sys.platform != 'win32':
-			pytest.skip('Windows-only test')
-
-		# Also check ctypes.windll availability as defense in depth
-		ctypes = _create_windows_mocks()
-		if ctypes is None:
-			pytest.skip('ctypes.windll not available')
-
 		from browser_use.skill_cli.tunnel import _kill_process
 
 		mock_handle = MagicMock()
@@ -136,23 +126,20 @@ class TestKillProcessWindows:
 		terminate_process = MagicMock(return_value=True)
 		close_handle = MagicMock()
 
-		original_windll = ctypes.windll
+		fake_ctypes = _make_fake_ctypes()
+		fake_ctypes.windll.kernel32 = MagicMock(
+			OpenProcess=open_process,
+			TerminateProcess=terminate_process,
+			CloseHandle=close_handle,
+		)
+
 		original_platform = sys.platform
 
-		class MockWindll:
-			kernel32 = MagicMock(
-				OpenProcess=open_process,
-				TerminateProcess=terminate_process,
-				CloseHandle=close_handle,
-			)
-
 		try:
-			ctypes.windll = MockWindll()
-			sys.platform = 'win32'
-
-			with MagicMock() as mock_is_alive:
-				mock_is_alive.return_value = False  # Process exits immediately
-				with patch('browser_use.skill_cli.tunnel._is_process_alive', mock_is_alive):
+			with patch('browser_use.skill_cli.tunnel.ctypes', fake_ctypes):
+				sys.platform = 'win32'
+				with patch('browser_use.skill_cli.tunnel._is_process_alive') as mock_is_alive:
+					mock_is_alive.return_value = False  # Process exits immediately
 					result = _kill_process(1234)
 
 			assert result is True
@@ -162,19 +149,11 @@ class TestKillProcessWindows:
 			# _is_process_alive should be called at least once
 			assert mock_is_alive.call_count >= 1
 		finally:
-			ctypes.windll = original_windll
 			sys.platform = original_platform
 
 	@staticmethod
 	def test_kill_process_windows_success_waits_for_exit():
 		"""Test Windows path: TerminateProcess succeeds but process requires waiting."""
-		if sys.platform != 'win32':
-			pytest.skip('Windows-only test')
-
-		ctypes = _create_windows_mocks()
-		if ctypes is None:
-			pytest.skip('ctypes.windll not available')
-
 		from browser_use.skill_cli.tunnel import _kill_process
 
 		mock_handle = MagicMock()
@@ -182,80 +161,60 @@ class TestKillProcessWindows:
 		terminate_process = MagicMock(return_value=True)
 		close_handle = MagicMock()
 
-		original_windll = ctypes.windll
+		fake_ctypes = _make_fake_ctypes()
+		fake_ctypes.windll.kernel32 = MagicMock(
+			OpenProcess=open_process,
+			TerminateProcess=terminate_process,
+			CloseHandle=close_handle,
+		)
+
 		original_platform = sys.platform
 
-		class MockWindll:
-			kernel32 = MagicMock(
-				OpenProcess=open_process,
-				TerminateProcess=terminate_process,
-				CloseHandle=close_handle,
-			)
-
 		try:
-			ctypes.windll = MockWindll()
-			sys.platform = 'win32'
+			with patch('browser_use.skill_cli.tunnel.ctypes', fake_ctypes):
+				sys.platform = 'win32'
+				# Process still alive for first 3 checks, then exits
+				call_count = [0]
 
-			# Process still alive for first 3 checks, then exits
-			call_count = [0]
+				def fake_is_alive(pid):
+					call_count[0] += 1
+					return call_count[0] <= 3
 
-			def fake_is_alive(pid):
-				call_count[0] += 1
-				return call_count[0] <= 3
-
-			with patch('browser_use.skill_cli.tunnel._is_process_alive', side_effect=fake_is_alive):
-				with patch('browser_use.skill_cli.tunnel.time.sleep'):
-					result = _kill_process(1234)
+				with patch('browser_use.skill_cli.tunnel._is_process_alive', side_effect=fake_is_alive):
+					with patch('browser_use.skill_cli.tunnel.time.sleep'):  # Skip actual sleeps
+						result = _kill_process(1234)
 
 			assert result is True
 			assert call_count[0] == 4  # 3 alive checks + 1 exit
 			close_handle.assert_called_once_with(mock_handle)
 		finally:
-			ctypes.windll = original_windll
 			sys.platform = original_platform
 
 	@staticmethod
 	def test_kill_process_windows_open_process_returns_null():
 		"""Test Windows path: OpenProcess returns NULL handle (process not found)."""
-		if sys.platform != 'win32':
-			pytest.skip('Windows-only test')
-
-		ctypes = _create_windows_mocks()
-		if ctypes is None:
-			pytest.skip('ctypes.windll not available')
-
 		from browser_use.skill_cli.tunnel import _kill_process
 
 		open_process = MagicMock(return_value=None)
 
-		original_windll = ctypes.windll
+		fake_ctypes = _make_fake_ctypes()
+		fake_ctypes.windll.kernel32 = MagicMock(OpenProcess=open_process)
+
 		original_platform = sys.platform
 
-		class MockWindll:
-			kernel32 = MagicMock(OpenProcess=open_process)
-
 		try:
-			ctypes.windll = MockWindll()
-			sys.platform = 'win32'
-
-			result = _kill_process(9999)
+			with patch('browser_use.skill_cli.tunnel.ctypes', fake_ctypes):
+				sys.platform = 'win32'
+				result = _kill_process(9999)
 
 			assert result is False
 			open_process.assert_called_once()
 		finally:
-			ctypes.windll = original_windll
 			sys.platform = original_platform
 
 	@staticmethod
 	def test_kill_process_windows_terminate_fails():
 		"""Test Windows path: TerminateProcess returns False."""
-		if sys.platform != 'win32':
-			pytest.skip('Windows-only test')
-
-		ctypes = _create_windows_mocks()
-		if ctypes is None:
-			pytest.skip('ctypes.windll not available')
-
 		from browser_use.skill_cli.tunnel import _kill_process
 
 		mock_handle = MagicMock()
@@ -263,26 +222,23 @@ class TestKillProcessWindows:
 		terminate_process = MagicMock(return_value=False)
 		close_handle = MagicMock()
 
-		original_windll = ctypes.windll
+		fake_ctypes = _make_fake_ctypes()
+		fake_ctypes.windll.kernel32 = MagicMock(
+			OpenProcess=open_process,
+			TerminateProcess=terminate_process,
+			CloseHandle=close_handle,
+		)
+
 		original_platform = sys.platform
 
-		class MockWindll:
-			kernel32 = MagicMock(
-				OpenProcess=open_process,
-				TerminateProcess=terminate_process,
-				CloseHandle=close_handle,
-			)
-
 		try:
-			ctypes.windll = MockWindll()
-			sys.platform = 'win32'
-
-			result = _kill_process(1234)
+			with patch('browser_use.skill_cli.tunnel.ctypes', fake_ctypes):
+				sys.platform = 'win32'
+				result = _kill_process(1234)
 
 			assert result is False
 			close_handle.assert_called_once_with(mock_handle)
 		finally:
-			ctypes.windll = original_windll
 			sys.platform = original_platform
 
 
@@ -327,7 +283,7 @@ class TestKillProcessUnix:
 
 			with patch('os.kill') as mock_kill:
 				with patch('browser_use.skill_cli.tunnel._is_process_alive', side_effect=fake_is_alive):
-					with patch('browser_use.skill_cli.tunnel.time.sleep'):
+					with patch('browser_use.skill_cli.tunnel.time.sleep'):  # Skip actual sleeps
 						result = _kill_process(1234)
 
 			assert result is True
