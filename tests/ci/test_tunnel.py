@@ -269,7 +269,11 @@ class TestKillProcessWindows:
 
 
 class TestKillProcessUnix:
-	"""Tests for _kill_process on Unix (non-Windows)."""
+	"""Tests for _kill_process on Unix (non-Windows).
+
+	These tests mock signal.SIGTERM and signal.SIGKILL to allow running
+	on non-Unix platforms (e.g., Windows CI) where these constants don't exist.
+	"""
 
 	def test_kill_process_unix_sigterm_kills_immediately(self):
 		"""Test Unix path: SIGTERM kills process immediately."""
@@ -278,12 +282,16 @@ class TestKillProcessUnix:
 		original_platform = sys.platform
 		try:
 			sys.platform = "linux"
-			with patch("os.kill") as mock_kill:
-				with patch(
-					"browser_use.skill_cli.tunnel._is_process_alive",
-					return_value=False,
-				):
-					result = _kill_process(1234)
+			# Mock signal constants for cross-platform compatibility
+			with patch("signal.SIGTERM", 15):
+				with patch("signal.SIGKILL", 9):
+					with patch("os.kill") as mock_kill:
+						with patch(
+							"browser_use.skill_cli.tunnel._is_process_alive",
+							return_value=False,
+						):
+							with patch("browser_use.skill_cli.tunnel.time.sleep"):
+								result = _kill_process(1234)
 			assert result is True
 			mock_kill.assert_called_once_with(1234, 15)  # 15 = SIGTERM
 		finally:
@@ -302,12 +310,16 @@ class TestKillProcessUnix:
 				call_count[0] += 1
 				return True  # Always alive
 
-			with patch("os.kill") as mock_kill:
-				with patch(
-					"browser_use.skill_cli.tunnel._is_process_alive",
-					side_effect=fake_is_alive,
-				):
-					result = _kill_process(1234)
+			# Mock signal constants and time.sleep for cross-platform compatibility
+			with patch("signal.SIGTERM", 15):
+				with patch("signal.SIGKILL", 9):
+					with patch("os.kill") as mock_kill:
+						with patch(
+							"browser_use.skill_cli.tunnel._is_process_alive",
+							side_effect=fake_is_alive,
+						):
+							with patch("browser_use.skill_cli.tunnel.time.sleep"):
+								result = _kill_process(1234)
 			assert result is True
 			# Should have sent SIGTERM first, then SIGKILL after 10 sleeps
 			assert mock_kill.call_count == 2
@@ -324,8 +336,11 @@ class TestKillProcessUnix:
 		original_platform = sys.platform
 		try:
 			sys.platform = "linux"
-			with patch("os.kill", side_effect=ProcessLookupError("No such process")):
-				result = _kill_process(9999)
+			# Mock signal constants for cross-platform compatibility
+			with patch("signal.SIGTERM", 15):
+				with patch("signal.SIGKILL", 9):
+					with patch("os.kill", side_effect=ProcessLookupError("No such process")):
+						result = _kill_process(9999)
 			assert result is False
 		finally:
 			sys.platform = original_platform
