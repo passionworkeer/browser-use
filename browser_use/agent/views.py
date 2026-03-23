@@ -714,8 +714,9 @@ class AgentHistoryList(BaseModel, Generic[AgentStructuredOutput]):
 				if isinstance(model_output, dict):
 					try:
 						h['model_output'] = output_model.model_validate(model_output)
-					except Exception:
-						# Normalize to None if validation fails
+					except (ValidationError, TypeError, AttributeError) as e:
+						# Normalize to None if validation fails or object lacks required methods
+						logger.debug(f"Failed to validate model_output: {e}")
 						h['model_output'] = None
 				else:
 					h['model_output'] = None
@@ -729,7 +730,7 @@ class AgentHistoryList(BaseModel, Generic[AgentStructuredOutput]):
 				h['state'] = {}
 			state = h['state']
 			if 'interacted_element' not in state:
-				state['interacted_element'] = None
+				state['interacted_element'] = []
 
 			validated_history.append(h)
 
