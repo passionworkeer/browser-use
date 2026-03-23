@@ -693,20 +693,32 @@ class AgentHistoryList(BaseModel, Generic[AgentStructuredOutput]):
 		history_items = data.get('history')
 		if history_items is None:
 			history_items = []
+			data['history'] = history_items  # Update data so model_validate receives a list
 
-		# loop through history and validate output_model actions to enrich with custom actions
+		# Filter out non-dict items (malformed) and normalize each valid item
+		normalized_items = []
 		for h in history_items:
+			# Skip None items
 			if h is None:
 				continue
-			model_output = h.get('model_output')
-			if model_output:
-				if isinstance(model_output, dict):
+			# Only process dict items; skip malformed non-dict items
+			if not isinstance(h, dict):
+				continue
+			# Normalize model_output: check presence first, then validate if truthy dict
+			if 'model_output' in h:
+				model_output = h['model_output']
+				if model_output and isinstance(model_output, dict):
 					h['model_output'] = output_model.model_validate(model_output)
-				else:
+				elif not model_output:
 					h['model_output'] = None
+			# Ensure state has interacted_element
 			state = h.get('state')
 			if state is not None and 'interacted_element' not in state:
 				state['interacted_element'] = None
+			normalized_items.append(h)
+
+		# Update data with filtered/normalized items
+		data['history'] = normalized_items
 
 		history = cls.model_validate(data)
 		return history

@@ -102,6 +102,10 @@ class _FakeCtypes:
 	def __init__(self):
 		self.windll = MagicMock()
 
+	def __getattr__(self, name: str):
+		"""Return a MagicMock for any attribute lookup (e.g., wintypes)."""
+		return MagicMock()
+
 
 def _make_fake_ctypes() -> _FakeCtypes:
 	"""Return a fully-isolated fake ctypes object with mock windll."""
