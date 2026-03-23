@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
@@ -689,8 +690,10 @@ class AgentHistoryList(BaseModel, Generic[AgentStructuredOutput]):
 
 	@classmethod
 	def load_from_dict(cls, data: dict[str, Any], output_model: type[AgentOutput]) -> AgentHistoryList:
-		# Make a shallow copy to avoid mutating the caller's data
-		data = dict(data)
+		# Deep copy to avoid mutating the caller's nested data structures.
+		# A shallow copy of `data` alone is insufficient because history items
+		# and their nested `state` dicts are still shared references.
+		data = copy.deepcopy(data)
 
 		# Handle missing/None history gracefully
 		history_data = data.get('history')
@@ -724,7 +727,6 @@ class AgentHistoryList(BaseModel, Generic[AgentStructuredOutput]):
 				h['model_output'] = None
 
 			# Handle state: normalize to empty dict if missing, None, or not a dict
-			# Use setdefault to properly handle existing None or invalid values
 			h['state'] = h.get('state') or {}
 			if not isinstance(h['state'], dict):
 				h['state'] = {}
