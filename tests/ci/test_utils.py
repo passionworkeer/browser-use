@@ -28,10 +28,16 @@ class TestGetChromeUserDataDirs:
         inside the fake is_dir function causes infinite recursion because
         exists() internally uses is_dir(). The correct approach stores the real
         Path.is_dir method and calls it via a side_effect that bypasses the mock.
+
+        Note: the Brave config path is ~/.config/BraveSoftware/Brave-Browser
+        (NOT ~/.config/Brave/Brave-Browser). This test verifies both that the
+        correct path is checked as a candidate AND that the wrong path is not.
         """
         def fake_is_dir(self):
             # Use as_posix() for cross-platform path normalization
             path_str = self.as_posix()
+            # Only google-chrome and chromium exist; BraveSoftware/Brave-Browser
+            # and the wrong Brave/Brave-Browser path do not exist
             existing = {
                 '/home/user/.config/google-chrome',
                 '/home/user/.config/chromium',
@@ -55,12 +61,39 @@ class TestGetChromeUserDataDirs:
         assert '/home/user/.config/google-chrome' in normalized_checked
         assert '/home/user/.config/chromium' in normalized_checked
         assert '/home/user/.config/BraveSoftware/Brave-Browser' in normalized_checked
+        assert '/home/user/.config/microsoft-edge' in normalized_checked
 
         # Only existing dirs should be in result
         result_strs = [_normalize_path(p) for p in result]
         assert '/home/user/.config/google-chrome' in result_strs
         assert '/home/user/.config/chromium' in result_strs
+        # Correct Brave path not in result (doesn't exist in test)
         assert '/home/user/.config/BraveSoftware/Brave-Browser' not in result_strs
+        # Wrong Brave path also not in result (not checked as candidate)
+        assert '/home/user/.config/Brave/Brave-Browser' not in result_strs
+
+    def test_linux_brave_software_dir_returned_when_exists(self):
+        """When ~/.config/BraveSoftware/Brave-Browser exists, it is included in results."""
+        def fake_is_dir(self):
+            path_str = self.as_posix()
+            existing = {
+                '/home/user/.config/google-chrome',
+                '/home/user/.config/BraveSoftware/Brave-Browser',
+            }
+            return path_str in existing
+
+        mock_home = Path('/home/user')
+
+        with patch.object(Path, 'home', return_value=mock_home):
+            with patch.object(Path, 'is_dir', fake_is_dir):
+                with patch('browser_use.skill_cli.utils.platform.system', return_value='Linux'):
+                    result = get_chrome_user_data_dirs()
+
+        result_strs = [_normalize_path(p) for p in result]
+        assert '/home/user/.config/google-chrome' in result_strs
+        assert '/home/user/.config/BraveSoftware/Brave-Browser' in result_strs
+        # Wrong Brave path still not a candidate
+        assert '/home/user/.config/Brave/Brave-Browser' not in result_strs
 
     def test_macos_returns_only_existing_dirs(self):
         """On macOS only existing directories under ~/Library/Application Support are returned."""
@@ -266,3 +299,284 @@ class TestGetChromeProfilePath:
         with patch('browser_use.skill_cli.utils.platform.system', return_value='Darwin'):
             result = get_chrome_profile_path('my-profile')
         assert result == 'my-profile'
+
+
+class TestListChromeProfiles:
+    """Test list_chrome_profiles() with executable_path parameter on Linux.
+
+    These tests verify that profile listing uses the correct user-data directory
+    based on the detected browser executable, rather than defaulting to Chrome.
+    """
+
+    def test_linux_chromium_uses_correct_profile_dir(self):
+        """On Linux with Chromium executable, list_chrome_profiles reads from ~/.config/chromium."""
+        from browser_use.skill_cli.utils import list_chrome_profiles
+
+        chromium_user_data = '/home/user/.config/chromium'
+        chromium_local_state = f'{chromium_user_data}/Local State'
+        fake_local_state = {
+            'profile': {
+                'info_cache': {
+                    'Default': {'name': 'Person 1'},
+                    'Profile 1': {'name': 'Work'},
+                }
+            }
+        }
+
+        orig_exists = Path.exists
+
+        def fake_exists(self):
+            return self.as_posix() == chromium_local_state
+
+        orig_open = open
+
+        def fake_open(path, *args, **kwargs):
+            path_str = path.as_posix() if hasattr(path, 'as_posix') else str(path)
+            if path_str == chromium_local_state:
+                import io
+                import json as json_mod
+                return io.StringIO(json_mod.dumps(fake_local_state))
+            return orig_open(path, *args, **kwargs)
+
+        with patch.object(Path, 'exists', fake_exists):
+            with patch('builtins.open', fake_open):
+                with patch('browser_use.skill_cli.utils.get_chrome_profile_path', return_value=chromium_user_data):
+                    result = list_chrome_profiles(executable_path='/usr/bin/chromium')
+
+        assert len(result) == 2
+        assert result[0]['directory'] == 'Default'
+        assert result[1]['directory'] == 'Profile 1'
+
+    def test_linux_brave_uses_correct_profile_dir(self):
+        """On Linux with Brave executable, list_chrome_profiles reads from ~/.config/BraveSoftware/Brave-Browser."""
+        from browser_use.skill_cli.utils import list_chrome_profiles
+
+        brave_user_data = '/home/user/.config/BraveSoftware/Brave-Browser'
+        brave_local_state = f'{brave_user_data}/Local State'
+        fake_local_state = {
+            'profile': {
+                'info_cache': {
+                    'Default': {'name': 'Person 1'},
+                    'Profile 1': {'name': 'Brave Profile'},
+                }
+            }
+        }
+
+        orig_exists = Path.exists
+        orig_open = open
+
+        def fake_exists(self):
+            return self.as_posix() == brave_local_state
+
+        def fake_open(path, *args, **kwargs):
+            path_str = path.as_posix() if hasattr(path, 'as_posix') else str(path)
+            if path_str == brave_local_state:
+                import io
+                import json as json_mod
+                return io.StringIO(json_mod.dumps(fake_local_state))
+            return orig_open(path, *args, **kwargs)
+
+        with patch.object(Path, 'exists', fake_exists):
+            with patch('builtins.open', fake_open):
+                with patch('browser_use.skill_cli.utils.get_chrome_profile_path', return_value=brave_user_data):
+                    result = list_chrome_profiles(executable_path='/usr/bin/brave-browser')
+
+        assert len(result) == 2
+
+    def test_linux_edge_uses_correct_profile_dir(self):
+        """On Linux with Edge executable, list_chrome_profiles reads from ~/.config/microsoft-edge."""
+        from browser_use.skill_cli.utils import list_chrome_profiles
+
+        edge_user_data = '/home/user/.config/microsoft-edge'
+        edge_local_state = f'{edge_user_data}/Local State'
+        fake_local_state = {
+            'profile': {
+                'info_cache': {
+                    'Default': {'name': 'Person 1'},
+                }
+            }
+        }
+
+        orig_exists = Path.exists
+        orig_open = open
+
+        def fake_exists(self):
+            return self.as_posix() == edge_local_state
+
+        def fake_open(path, *args, **kwargs):
+            path_str = path.as_posix() if hasattr(path, 'as_posix') else str(path)
+            if path_str == edge_local_state:
+                import io
+                import json as json_mod
+                return io.StringIO(json_mod.dumps(fake_local_state))
+            return orig_open(path, *args, **kwargs)
+
+        with patch.object(Path, 'exists', fake_exists):
+            with patch('builtins.open', fake_open):
+                with patch('browser_use.skill_cli.utils.get_chrome_profile_path', return_value=edge_user_data):
+                    result = list_chrome_profiles(executable_path='/usr/bin/microsoft-edge')
+
+        assert len(result) == 1
+
+    def test_linux_chrome_uses_google_chrome_dir(self):
+        """On Linux with Google Chrome executable, list_chrome_profiles reads from ~/.config/google-chrome."""
+        from browser_use.skill_cli.utils import list_chrome_profiles
+
+        chrome_user_data = '/home/user/.config/google-chrome'
+        chrome_local_state = f'{chrome_user_data}/Local State'
+        fake_local_state = {
+            'profile': {
+                'info_cache': {
+                    'Default': {'name': 'Person 1'},
+                }
+            }
+        }
+
+        orig_exists = Path.exists
+        orig_open = open
+
+        def fake_exists(self):
+            return self.as_posix() == chrome_local_state
+
+        def fake_open(path, *args, **kwargs):
+            path_str = path.as_posix() if hasattr(path, 'as_posix') else str(path)
+            if path_str == chrome_local_state:
+                import io
+                import json as json_mod
+                return io.StringIO(json_mod.dumps(fake_local_state))
+            return orig_open(path, *args, **kwargs)
+
+        with patch.object(Path, 'exists', fake_exists):
+            with patch('builtins.open', fake_open):
+                with patch('browser_use.skill_cli.utils.get_chrome_profile_path', return_value=chrome_user_data):
+                    result = list_chrome_profiles(executable_path='/usr/bin/google-chrome')
+
+        assert len(result) == 1
+
+    def test_explicit_user_data_dir_overrides_executable_path(self):
+        """When user_data_dir is provided, it is used regardless of executable_path."""
+        from browser_use.skill_cli.utils import list_chrome_profiles
+
+        explicit_dir = '/custom/path/Chrome/User Data'
+        explicit_local_state = f'{explicit_dir}/Local State'
+        fake_local_state = {
+            'profile': {
+                'info_cache': {
+                    'Default': {'name': 'Custom'},
+                    'Profile 1': {'name': 'Work'},
+                }
+            }
+        }
+
+        orig_exists = Path.exists
+        orig_open = open
+
+        def fake_exists(self):
+            return self.as_posix() == explicit_local_state
+
+        def fake_open(path, *args, **kwargs):
+            path_str = path.as_posix() if hasattr(path, 'as_posix') else str(path)
+            if path_str == explicit_local_state:
+                import io
+                import json as json_mod
+                return io.StringIO(json_mod.dumps(fake_local_state))
+            return orig_open(path, *args, **kwargs)
+
+        with patch.object(Path, 'exists', fake_exists):
+            with patch('builtins.open', fake_open):
+                # Chromium path passed but explicit dir should be used instead
+                result = list_chrome_profiles(
+                    user_data_dir=explicit_dir,
+                    executable_path='/usr/bin/chromium',
+                )
+
+        assert len(result) == 2
+
+    def test_no_local_state_returns_empty(self):
+        """When Local State does not exist, list_chrome_profiles returns an empty list."""
+        from browser_use.skill_cli.utils import list_chrome_profiles
+
+        def always_false(self):
+            return False
+
+        with patch.object(Path, 'exists', always_false):
+            with patch('browser_use.skill_cli.utils.get_chrome_profile_path', return_value='/home/user/.config/chromium'):
+                result = list_chrome_profiles(executable_path='/usr/bin/chromium')
+
+        assert result == []
+
+    def test_browser_session_list_chrome_profiles_auto_detect(self):
+        """BrowserSession.list_chrome_profiles auto-detects executable when neither arg is given."""
+        from browser_use.browser.session import BrowserSession
+
+        chrome_user_data = '/home/user/.config/google-chrome'
+        chrome_local_state = f'{chrome_user_data}/Local State'
+        fake_local_state = {
+            'profile': {
+                'info_cache': {
+                    'Default': {'name': 'Person 1'},
+                }
+            }
+        }
+
+        orig_exists = Path.exists
+        orig_open = open
+
+        def fake_exists(self):
+            return self.as_posix() == chrome_local_state
+
+        def fake_open(path, *args, **kwargs):
+            path_str = path.as_posix() if hasattr(path, 'as_posix') else str(path)
+            if path_str == chrome_local_state:
+                import io
+                import json as json_mod
+                return io.StringIO(json_mod.dumps(fake_local_state))
+            return orig_open(path, *args, **kwargs)
+
+        with patch.object(Path, 'exists', fake_exists):
+            with patch('builtins.open', fake_open):
+                with patch('browser_use.skill_cli.utils.find_chrome_executable', return_value='/usr/bin/google-chrome'):
+                    with patch('browser_use.skill_cli.utils.get_chrome_profile_path', return_value=chrome_user_data):
+                        result = BrowserSession.list_chrome_profiles()
+
+        assert len(result) == 1
+        assert result[0]['directory'] == 'Default'
+
+    def test_browser_session_list_chrome_profiles_with_executable_path(self):
+        """BrowserSession.list_chrome_profiles with executable_path bypasses auto-detection."""
+        from browser_use.browser.session import BrowserSession
+
+        chromium_user_data = '/home/user/.config/chromium'
+        chromium_local_state = f'{chromium_user_data}/Local State'
+        fake_local_state = {
+            'profile': {
+                'info_cache': {
+                    'Default': {'name': 'Person 1'},
+                    'Profile 1': {'name': 'Work'},
+                }
+            }
+        }
+
+        orig_exists = Path.exists
+        orig_open = open
+
+        def fake_exists(self):
+            return self.as_posix() == chromium_local_state
+
+        def fake_open(path, *args, **kwargs):
+            path_str = path.as_posix() if hasattr(path, 'as_posix') else str(path)
+            if path_str == chromium_local_state:
+                import io
+                import json as json_mod
+                return io.StringIO(json_mod.dumps(fake_local_state))
+            return orig_open(path, *args, **kwargs)
+
+        with patch.object(Path, 'exists', fake_exists):
+            with patch('builtins.open', fake_open):
+                # Pass executable_path directly — should NOT call find_chrome_executable
+                with patch('browser_use.skill_cli.utils.find_chrome_executable') as mock_find:
+                    with patch('browser_use.skill_cli.utils.get_chrome_profile_path', return_value=chromium_user_data):
+                        result = BrowserSession.list_chrome_profiles(executable_path='/usr/bin/chromium')
+
+        mock_find.assert_not_called()
+        assert len(result) == 2

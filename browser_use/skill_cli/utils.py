@@ -293,7 +293,7 @@ def get_chrome_user_data_dirs() -> list[Path]:
 			candidates.append(base / name)
 	elif system == 'Linux':
 		base = home / '.config'
-		for name in ('google-chrome', 'google-chrome-unstable', 'chromium', 'BraveSoftware/Brave-Browser'):
+		for name in ('google-chrome', 'google-chrome-unstable', 'chromium', 'BraveSoftware/Brave-Browser', 'microsoft-edge'):
 			candidates.append(base / name)
 	elif system == 'Windows':
 		local_app_data = os.environ.get('LOCALAPPDATA', str(home / 'AppData' / 'Local'))

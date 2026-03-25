@@ -432,19 +432,24 @@ class BrowserSession(BaseModel):
 		)
 
 	@classmethod
-	def list_chrome_profiles(cls, user_data_dir: str | None = None) -> list[dict[str, str]]:
+	def list_chrome_profiles(cls, user_data_dir: str | None = None, executable_path: str | None = None) -> list[dict[str, str]]:
 		"""List available browser profiles on the system.
 
 		Args:
 			user_data_dir: Optional explicit user data directory to read profiles from.
-				When None, auto-detects the Chrome/Chromium executable and uses
-				its corresponding profile directory (handles Chrome vs Chromium
-				vs Brave vs Edge on all platforms).
+				When None, uses the browser-specific user data directory derived from
+				executable_path via get_chrome_profile_path(None, executable_path).
+			executable_path: Optional path to the Chrome/Chromium/Brave/Edge executable.
+				Used to select the correct browser-specific profile directory when
+				user_data_dir is None. When both are None, auto-detects via
+				find_chrome_executable() (handles Chrome vs Chromium vs Brave vs Edge
+				on all platforms).
 		"""
 		from browser_use.skill_cli.utils import find_chrome_executable, list_chrome_profiles
 
 		if user_data_dir is None:
-			executable_path = find_chrome_executable()
+			if executable_path is None:
+				executable_path = find_chrome_executable()
 			return list_chrome_profiles(executable_path=executable_path)
 		return list_chrome_profiles(user_data_dir=user_data_dir)
 
