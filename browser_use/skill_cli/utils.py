@@ -202,49 +202,78 @@ def find_chrome_executable() -> str | None:
 	return None
 
 
-def _is_chromium_browser(executable_path: str | None) -> bool:
-	"""Check if the executable is a Chromium-based browser (not Google Chrome).
+def _get_browser_type(executable_path: str | None) -> str:
+	"""Classify the browser type based on executable path.
 
-	On Linux, both Chrome and Chromium may be installed. This function
-	determines which one was found so we can use the correct profile path.
+	Returns one of: 'chrome', 'chromium', 'brave', 'edge'
+	Defaults to 'chrome' when unknown or None.
 	"""
 	if not executable_path:
-		return False
-	# Check by executable name/path for Chromium-based browsers
+		return 'chrome'
 	executable_lower = executable_path.lower()
-	chromium_names = ('chromium', 'chromium-browser', 'brave', 'edge')
-	return any(name in executable_lower for name in chromium_names)
+	if 'brave' in executable_lower:
+		return 'brave'
+	if 'edge' in executable_lower or 'microsoft-edge' in executable_lower:
+		return 'edge'
+	if 'chromium' in executable_lower:
+		return 'chromium'
+	return 'chrome'
 
 
 def get_chrome_profile_path(profile: str | None, executable_path: str | None = None) -> str | None:
-	"""Get Chrome user data directory for a profile.
+	"""Get browser user data directory for a profile.
 
 	If profile is None, returns the default user data directory for the
-	detected browser (Chrome or Chromium). Uses executable_path to determine
-	which browser was found on Linux to return the matching profile path.
+	detected browser. Uses executable_path to determine which browser was
+	found so the correct profile path is returned (Chrome, Chromium, Brave,
+	or Edge each have distinct directories on all platforms).
 
 	Args:
 		profile: Profile name/subdirectory, or None for default profile.
-		executable_path: Optional path to the detected Chrome/Chromium executable.
-			Used on Linux to select the correct profile directory when both
-			Chrome and Chromium are installed.
+		executable_path: Optional path to the detected Chrome/Chromium/Brave/Edge
+			executable. Used to select the correct browser-specific profile
+			directory when multiple browsers are installed.
 	"""
-	if profile is None:
-		system = platform.system()
-		if system == 'Darwin':
-			return str(Path.home() / 'Library' / 'Application Support' / 'Google' / 'Chrome')
-		elif system == 'Linux':
-			# On Linux, the profile directory differs between Chrome and Chromium.
-			# Use the executable path to determine which browser was detected.
-			if _is_chromium_browser(executable_path):
-				return str(Path.home() / '.config' / 'chromium')
-			return str(Path.home() / '.config' / 'google-chrome')
-		elif system == 'Windows':
-			return os.path.expandvars(r'%LocalAppData%\Google\Chrome\User Data')
-	else:
-		# Return the profile name - Chrome will use it as a subdirectory
-		# The actual path will be user_data_dir/profile
+	if profile is not None:
+		# Return the profile name - the browser will use it as a subdirectory
+		# of user_data_dir. caller is responsible for setting user_data_dir
+		# to the correct browser path.
 		return profile
+
+	system = platform.system()
+	browser_type = _get_browser_type(executable_path)
+
+	if system == 'Darwin':
+		if browser_type == 'brave':
+			return str(Path.home() / 'Library' / 'Application Support' / 'BraveSoftware' / 'Brave-Browser')
+		if browser_type == 'edge':
+			return str(Path.home() / 'Library' / 'Application Support' / 'Microsoft Edge')
+		if browser_type == 'chromium':
+			return str(Path.home() / 'Library' / 'Application Support' / 'Chromium')
+		# chrome (default)
+		return str(Path.home() / 'Library' / 'Application Support' / 'Google' / 'Chrome')
+
+	elif system == 'Linux':
+		if browser_type == 'brave':
+			return str(Path.home() / '.config' / 'BraveSoftware' / 'Brave-Browser')
+		if browser_type == 'edge':
+			return str(Path.home() / '.config' / 'microsoft-edge')
+		if browser_type == 'chromium':
+			return str(Path.home() / '.config' / 'chromium')
+		# chrome (default)
+		return str(Path.home() / '.config' / 'google-chrome')
+
+	elif system == 'Windows':
+		local_app_data = os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData' / 'Local'))
+		base = Path(local_app_data)
+		if browser_type == 'brave':
+			return str(base / 'BraveSoftware' / 'Brave-Browser' / 'User Data')
+		if browser_type == 'edge':
+			return str(base / 'Microsoft' / 'Edge' / 'User Data')
+		if browser_type == 'chromium':
+			return str(base / 'Chromium' / 'User Data')
+		# chrome (default)
+		return os.path.expandvars(r'%LocalAppData%\Google\Chrome\User Data')
 
 	return None
 
@@ -354,8 +383,18 @@ def discover_chrome_cdp_url() -> str:
 	)
 
 
-def list_chrome_profiles() -> list[dict[str, str]]:
-	"""List available Chrome profiles with their names.
+def list_chrome_profiles(user_data_dir: str | None = None, executable_path: str | None = None) -> list[dict[str, str]]:
+	"""List available Chrome/Browser profiles with their names.
+
+	Args:
+		user_data_dir: Optional explicit user data directory to read profiles from.
+			When None, uses the browser-specific user data directory derived from
+			executable_path via get_chrome_profile_path(None, executable_path).
+		executable_path: Optional path to the Chrome/Chromium/Brave/Edge executable.
+			Used to select the correct browser-specific profile directory when
+			user_data_dir is None. Required on Linux when user_data_dir is not
+			explicitly provided to avoid falling back to the Google Chrome path
+			and missing Chromium/Brave/Edge profiles.
 
 	Returns:
 		List of dicts with 'directory' and 'name' keys, ex:
@@ -363,7 +402,8 @@ def list_chrome_profiles() -> list[dict[str, str]]:
 	"""
 	import json
 
-	user_data_dir = get_chrome_profile_path(None)
+	if user_data_dir is None:
+		user_data_dir = get_chrome_profile_path(None, executable_path)
 	if user_data_dir is None:
 		return []
 

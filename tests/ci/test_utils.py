@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from browser_use.skill_cli.utils import (
-    _is_chromium_browser,
+    _get_browser_type,
     get_chrome_profile_path,
     get_chrome_user_data_dirs,
 )
@@ -102,31 +102,49 @@ class TestGetChromeUserDataDirs:
         assert 'C:/Users/user/AppData/Local/Chromium/User Data' not in result_strs
 
 
-class TestIsChromiumBrowser:
-    """Test _is_chromium_browser() correctly identifies Chromium-based browsers."""
+class TestGetBrowserType:
+    """Test _get_browser_type() correctly classifies browsers."""
 
-    def test_none_returns_false(self):
-        assert _is_chromium_browser(None) is False
+    def test_none_returns_chrome(self):
+        assert _get_browser_type(None) == 'chrome'
 
-    def test_chromium_returns_true(self):
-        assert _is_chromium_browser('/usr/bin/chromium') is True
-        assert _is_chromium_browser('/usr/bin/chromium-browser') is True
+    def test_chromium_returns_chromium(self):
+        assert _get_browser_type('/usr/bin/chromium') == 'chromium'
+        assert _get_browser_type('/usr/bin/chromium-browser') == 'chromium'
 
-    def test_google_chrome_returns_false(self):
-        assert _is_chromium_browser('/usr/bin/google-chrome') is False
-        assert _is_chromium_browser('/usr/bin/google-chrome-stable') is False
+    def test_google_chrome_returns_chrome(self):
+        assert _get_browser_type('/usr/bin/google-chrome') == 'chrome'
+        assert _get_browser_type('/usr/bin/google-chrome-stable') == 'chrome'
 
-    def test_brave_returns_true(self):
-        assert _is_chromium_browser('/usr/bin/brave-browser') is True
+    def test_brave_returns_brave(self):
+        assert _get_browser_type('/usr/bin/brave-browser') == 'brave'
 
-    def test_edge_returns_true(self):
-        assert _is_chromium_browser('/usr/bin/microsoft-edge') is True
+    def test_edge_returns_edge(self):
+        assert _get_browser_type('/usr/bin/microsoft-edge') == 'edge'
 
-    def test_windows_chrome_returns_false(self):
-        assert _is_chromium_browser('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe') is False
+    def test_windows_chrome_returns_chrome(self):
+        assert _get_browser_type('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe') == 'chrome'
 
-    def test_windows_chromium_returns_true(self):
-        assert _is_chromium_browser('C:\\Program Files\\Chromium\\Application\\chrome.exe') is True
+    def test_windows_chromium_returns_chromium(self):
+        assert _get_browser_type('C:\\Program Files\\Chromium\\Application\\chrome.exe') == 'chromium'
+
+    def test_windows_brave_returns_brave(self):
+        assert _get_browser_type('C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe') == 'brave'
+
+    def test_windows_edge_returns_edge(self):
+        assert _get_browser_type('C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe') == 'edge'
+
+    def test_macos_chrome_returns_chrome(self):
+        assert _get_browser_type('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome') == 'chrome'
+
+    def test_macos_chromium_returns_chromium(self):
+        assert _get_browser_type('/Applications/Chromium.app/Contents/MacOS/Chromium') == 'chromium'
+
+    def test_macos_brave_returns_brave(self):
+        assert _get_browser_type('/Applications/Brave Browser.app/Contents/MacOS/Brave Browser') == 'brave'
+
+    def test_macos_edge_returns_edge(self):
+        assert _get_browser_type('/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge') == 'edge'
 
 
 class TestGetChromeProfilePath:
@@ -154,10 +172,17 @@ class TestGetChromeProfilePath:
         assert result == expected
 
     def test_linux_brave_profile_path(self):
-        """On Linux with Brave executable, return the Chromium profile path (Brave uses Chromium)."""
+        """On Linux with Brave executable, return the Brave profile path."""
         with patch('browser_use.skill_cli.utils.platform.system', return_value='Linux'):
             result = get_chrome_profile_path(None, executable_path='/usr/bin/brave-browser')
-        expected = str(Path.home() / '.config' / 'chromium')
+        expected = str(Path.home() / '.config' / 'BraveSoftware' / 'Brave-Browser')
+        assert result == expected
+
+    def test_linux_edge_profile_path(self):
+        """On Linux with Edge executable, return the Edge profile path."""
+        with patch('browser_use.skill_cli.utils.platform.system', return_value='Linux'):
+            result = get_chrome_profile_path(None, executable_path='/usr/bin/microsoft-edge')
+        expected = str(Path.home() / '.config' / 'microsoft-edge')
         assert result == expected
 
     def test_linux_no_executable_path_defaults_to_chrome(self):
@@ -167,11 +192,59 @@ class TestGetChromeProfilePath:
         expected = str(Path.home() / '.config' / 'google-chrome')
         assert result == expected
 
+    def test_macos_brave_profile_path(self):
+        """On macOS with Brave executable, return the Brave Application Support directory."""
+        with patch('browser_use.skill_cli.utils.platform.system', return_value='Darwin'):
+            result = get_chrome_profile_path(None, executable_path='/Applications/Brave Browser.app/Contents/MacOS/Brave Browser')
+        expected = str(Path.home() / 'Library' / 'Application Support' / 'BraveSoftware' / 'Brave-Browser')
+        assert result == expected
+
+    def test_macos_edge_profile_path(self):
+        """On macOS with Edge executable, return the Edge Application Support directory."""
+        with patch('browser_use.skill_cli.utils.platform.system', return_value='Darwin'):
+            result = get_chrome_profile_path(None, executable_path='/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge')
+        expected = str(Path.home() / 'Library' / 'Application Support' / 'Microsoft Edge')
+        assert result == expected
+
+    def test_macos_chromium_profile_path(self):
+        """On macOS with Chromium executable, return the Chromium Application Support directory."""
+        with patch('browser_use.skill_cli.utils.platform.system', return_value='Darwin'):
+            result = get_chrome_profile_path(None, executable_path='/Applications/Chromium.app/Contents/MacOS/Chromium')
+        expected = str(Path.home() / 'Library' / 'Application Support' / 'Chromium')
+        assert result == expected
+
     def test_macos_profile_path(self):
         """On macOS, return the Chrome Application Support directory."""
         with patch('browser_use.skill_cli.utils.platform.system', return_value='Darwin'):
             result = get_chrome_profile_path(None)
         expected = str(Path.home() / 'Library' / 'Application Support' / 'Google' / 'Chrome')
+        assert result == expected
+
+    def test_windows_brave_profile_path(self):
+        """On Windows with Brave executable, return the Brave User Data directory."""
+        import os
+        with patch('browser_use.skill_cli.utils.platform.system', return_value='Windows'):
+            result = get_chrome_profile_path(None, executable_path='C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe')
+        local_app_data = os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData' / 'Local'))
+        expected = str(Path(local_app_data) / 'BraveSoftware' / 'Brave-Browser' / 'User Data')
+        assert result == expected
+
+    def test_windows_edge_profile_path(self):
+        """On Windows with Edge executable, return the Edge User Data directory."""
+        import os
+        with patch('browser_use.skill_cli.utils.platform.system', return_value='Windows'):
+            result = get_chrome_profile_path(None, executable_path='C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe')
+        local_app_data = os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData' / 'Local'))
+        expected = str(Path(local_app_data) / 'Microsoft' / 'Edge' / 'User Data')
+        assert result == expected
+
+    def test_windows_chromium_profile_path(self):
+        """On Windows with Chromium executable, return the Chromium User Data directory."""
+        import os
+        with patch('browser_use.skill_cli.utils.platform.system', return_value='Windows'):
+            result = get_chrome_profile_path(None, executable_path='C:\\Program Files\\Chromium\\Application\\chrome.exe')
+        local_app_data = os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData' / 'Local'))
+        expected = str(Path(local_app_data) / 'Chromium' / 'User Data')
         assert result == expected
 
     def test_windows_profile_path(self):

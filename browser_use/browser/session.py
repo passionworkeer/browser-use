@@ -413,7 +413,7 @@ class BrowserSession(BaseModel):
 			)
 
 		# Auto-select profile if not specified
-		profiles = list_chrome_profiles()
+		profiles = list_chrome_profiles(user_data_dir)
 		if profile_directory is None:
 			if profiles:
 				# Use first available profile
@@ -432,11 +432,21 @@ class BrowserSession(BaseModel):
 		)
 
 	@classmethod
-	def list_chrome_profiles(cls) -> list[dict[str, str]]:
-		"""List available Chrome profiles on the system"""
-		from browser_use.skill_cli.utils import list_chrome_profiles
+	def list_chrome_profiles(cls, user_data_dir: str | None = None) -> list[dict[str, str]]:
+		"""List available browser profiles on the system.
 
-		return list_chrome_profiles()
+		Args:
+			user_data_dir: Optional explicit user data directory to read profiles from.
+				When None, auto-detects the Chrome/Chromium executable and uses
+				its corresponding profile directory (handles Chrome vs Chromium
+				vs Brave vs Edge on all platforms).
+		"""
+		from browser_use.skill_cli.utils import find_chrome_executable, list_chrome_profiles
+
+		if user_data_dir is None:
+			executable_path = find_chrome_executable()
+			return list_chrome_profiles(executable_path=executable_path)
+		return list_chrome_profiles(user_data_dir=user_data_dir)
 
 	# Convenience properties for common browser settings
 	@property
