@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import sys
 from contextlib import contextmanager
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-import sys
 
 from browser_use.skill_cli.tunnel import TunnelManager, get_tunnel_manager
-
 
 # =============================================================================
 # Windows mocking helpers for _kill_process tests
@@ -262,6 +261,38 @@ class TestKillProcessWindows:
 			assert result is False
 			close_handle.assert_called_once_with(mock_handle)
 
+	@staticmethod
+	def test_kill_process_windows_timeout_returns_false():
+		"""Test Windows path: TerminateProcess succeeds but process stays alive → False."""
+		from browser_use.skill_cli.tunnel import _kill_process
+
+		with _windows_test_context():
+			import ctypes
+
+			mock_handle = MagicMock()
+			open_process = MagicMock(return_value=mock_handle)
+			terminate_process = MagicMock(return_value=True)
+			close_handle = MagicMock()
+
+			ctypes.windll.kernel32.OpenProcess = open_process
+			ctypes.windll.kernel32.TerminateProcess = terminate_process
+			ctypes.windll.kernel32.CloseHandle = close_handle
+
+			# _is_process_alive always returns True (process refuses to die)
+			with patch(
+				"browser_use.skill_cli.tunnel._is_process_alive",
+				return_value=True,
+			):
+				result = _kill_process(1234)
+
+			# After 10 × 0.1s timeout, returns False
+			assert result is False
+			terminate_process.assert_called_once_with(mock_handle, 1)
+			# CloseHandle should still be called to clean up the handle
+			assert close_handle.call_count == 1
+			# _is_process_alive should have been polled 10 times
+			# (we can't easily verify call count without a side_effect)
+
 
 # =============================================================================
 # Tests for _kill_process — Unix path
@@ -313,7 +344,7 @@ class TestKillProcessUnix:
 			assert mock_kill.call_count == 2
 			mock_kill.assert_any_call(1234, 15)  # SIGTERM
 			mock_kill.assert_any_call(1234, 9)  # SIGKILL
-			assert call_count[0] == 11  # 10 alive checks during grace + 1 final check
+			assert call_count[0] == 10  # 10 alive checks during grace period; no check after SIGKILL
 		finally:
 			sys.platform = original_platform
 
@@ -326,6 +357,19 @@ class TestKillProcessUnix:
 			sys.platform = "linux"
 			with patch("os.kill", side_effect=ProcessLookupError("No such process")):
 				result = _kill_process(9999)
+			assert result is False
+		finally:
+			sys.platform = original_platform
+
+	def test_kill_process_unix_oserror_on_sigterm(self):
+		"""Test Unix path: OSError (non-ProcessLookupError) on SIGTERM returns False."""
+		from browser_use.skill_cli.tunnel import _kill_process
+
+		original_platform = sys.platform
+		try:
+			sys.platform = "linux"
+			with patch("os.kill", side_effect=OSError("Operation not permitted")):
+				result = _kill_process(1234)
 			assert result is False
 		finally:
 			sys.platform = original_platform

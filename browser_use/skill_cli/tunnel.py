@@ -197,8 +197,9 @@ def _kill_process(pid: int) -> bool:
 				if not _is_process_alive(pid):
 					return True
 				time.sleep(0.1)
-			# Force kill if still alive
-			os.kill(pid, signal.SIGKILL)
+			# Force kill if still alive — use numeric 9 to avoid platform
+			# differences (signal.SIGKILL is not defined on Windows)
+			os.kill(pid, 9)
 			return True
 		except (OSError, ProcessLookupError):
 			return False
