@@ -4,7 +4,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from browser_use.skill_cli.utils import (
-	_is_chromium_browser,
 	get_chrome_profile_path,
 	get_chrome_user_data_dirs,
 )
@@ -105,35 +104,6 @@ class TestGetChromeUserDataDirs:
 		assert 'C:/Users/user/AppData/Local/Chromium/User Data' not in result_strs
 
 
-class TestIsChromiumBrowser:
-	"""Test _is_chromium_browser() correctly identifies Chromium-based browsers."""
-
-	def test_none_returns_false(self):
-		assert _is_chromium_browser(None) is False
-
-	def test_chromium_returns_true(self):
-		assert _is_chromium_browser('/usr/bin/chromium') is True
-		assert _is_chromium_browser('/usr/bin/chromium-browser') is True
-
-	def test_google_chrome_returns_false(self):
-		assert _is_chromium_browser('/usr/bin/google-chrome') is False
-		assert _is_chromium_browser('/usr/bin/google-chrome-stable') is False
-
-	def test_brave_returns_false(self):
-		"""Brave is handled via explicit mapping in get_chrome_profile_path(), not via _is_chromium_browser."""
-		assert _is_chromium_browser('/usr/bin/brave-browser') is False
-
-	def test_edge_returns_false(self):
-		"""Edge is handled via explicit mapping in get_chrome_profile_path(), not via _is_chromium_browser."""
-		assert _is_chromium_browser('/usr/bin/microsoft-edge') is False
-
-	def test_windows_chrome_returns_false(self):
-		assert _is_chromium_browser('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe') is False
-
-	def test_windows_chromium_returns_true(self):
-		assert _is_chromium_browser('C:\\Program Files\\Chromium\\Application\\chrome.exe') is True
-
-
 class TestGetChromeProfilePath:
 	"""Test get_chrome_profile_path() with the executable_path parameter on Linux."""
 
@@ -206,3 +176,128 @@ class TestGetChromeProfilePath:
 		with patch('browser_use.skill_cli.utils.platform.system', return_value='Darwin'):
 			result = get_chrome_profile_path('my-profile')
 		assert result == 'my-profile'
+
+
+class TestFindChromeExecutableLinux:
+	"""Test find_chrome_executable() on Linux finds Brave and Edge in addition to Chrome/Chromium."""
+
+	def test_finds_chromium_before_brave(self):
+		"""Chrome/Chromium should be preferred over Brave when both are present."""
+		with patch('browser_use.skill_cli.utils.platform.system', return_value='Linux'):
+			with patch('browser_use.skill_cli.utils.subprocess.run') as mock_run:
+				# Simulate chromium found first
+				mock_run.side_effect = [
+					# google-chrome: not found
+					type('MockResult', (), {'returncode': 1})(),
+					# google-chrome-stable: not found
+					type('MockResult', (), {'returncode': 1})(),
+					# chromium: found
+					type('MockResult', (), {'returncode': 0, 'stdout': '/usr/bin/chromium'})(),
+					# brave-browser: never reached
+					type('MockResult', (), {'returncode': 1})(),
+				]
+				from browser_use.skill_cli.utils import find_chrome_executable
+				result = find_chrome_executable()
+		assert result == '/usr/bin/chromium'
+
+	def test_finds_brave_when_chrome_not_present(self):
+		"""Brave should be found when Chrome/Chromium are not installed."""
+		with patch('browser_use.skill_cli.utils.platform.system', return_value='Linux'):
+			with patch('browser_use.skill_cli.utils.subprocess.run') as mock_run:
+				mock_run.side_effect = [
+					type('MockResult', (), {'returncode': 1})(),  # google-chrome
+					type('MockResult', (), {'returncode': 1})(),  # google-chrome-stable
+					type('MockResult', (), {'returncode': 1})(),  # chromium
+					type('MockResult', (), {'returncode': 1})(),  # chromium-browser
+					type('MockResult', (), {'returncode': 0, 'stdout': '/usr/bin/brave-browser'})(),  # brave-browser found
+				]
+				from browser_use.skill_cli.utils import find_chrome_executable
+				result = find_chrome_executable()
+		assert result == '/usr/bin/brave-browser'
+
+	def test_finds_microsoft_edge(self):
+		"""Microsoft Edge should be found when present."""
+		with patch('browser_use.skill_cli.utils.platform.system', return_value='Linux'):
+			with patch('browser_use.skill_cli.utils.subprocess.run') as mock_run:
+				mock_run.side_effect = [
+					type('MockResult', (), {'returncode': 1})(),  # google-chrome
+					type('MockResult', (), {'returncode': 1})(),  # google-chrome-stable
+					type('MockResult', (), {'returncode': 1})(),  # chromium
+					type('MockResult', (), {'returncode': 1})(),  # chromium-browser
+					type('MockResult', (), {'returncode': 1})(),  # brave-browser
+					type('MockResult', (), {'returncode': 0, 'stdout': '/usr/bin/microsoft-edge'})(),  # microsoft-edge found
+				]
+				from browser_use.skill_cli.utils import find_chrome_executable
+				result = find_chrome_executable()
+		assert result == '/usr/bin/microsoft-edge'
+
+	def test_returns_none_when_no_browser_found(self):
+		"""None should be returned when no browser is found."""
+		with patch('browser_use.skill_cli.utils.platform.system', return_value='Linux'):
+			with patch('browser_use.skill_cli.utils.subprocess.run') as mock_run:
+				mock_run.side_effect = [
+					type('MockResult', (), {'returncode': 1})(),
+					type('MockResult', (), {'returncode': 1})(),
+					type('MockResult', (), {'returncode': 1})(),
+					type('MockResult', (), {'returncode': 1})(),
+					type('MockResult', (), {'returncode': 1})(),
+					type('MockResult', (), {'returncode': 1})(),
+				]
+				from browser_use.skill_cli.utils import find_chrome_executable
+				result = find_chrome_executable()
+		assert result is None
+
+
+class TestListChromeProfiles:
+	"""Test list_chrome_profiles() with executable_path=None (backward-compat) and with executable_path set."""
+
+	def test_none_executable_reads_chrome_dir(self, tmp_path):
+		"""When executable_path is None, list_chrome_profiles reads google-chrome directory."""
+		from browser_use.skill_cli.utils import list_chrome_profiles
+
+		# Create a fake Local State file under the default chrome dir
+		chrome_dir = tmp_path / '.config' / 'google-chrome'
+		chrome_dir.mkdir(parents=True)
+		local_state = chrome_dir / 'Local State'
+		local_state.write_text('{"profile":{"info_cache":{"Default":{"name":"Person 1"}}}}')
+
+		with patch('browser_use.skill_cli.utils.platform.system', return_value='Linux'):
+			with patch('browser_use.skill_cli.utils.get_chrome_profile_path') as mock_get_path:
+				# When executable_path=None, get_chrome_profile_path returns google-chrome dir
+				mock_get_path.return_value = str(chrome_dir)
+				profiles = list_chrome_profiles(None)
+
+		assert len(profiles) == 1
+		assert profiles[0]['directory'] == 'Default'
+		assert profiles[0]['name'] == 'Person 1'
+
+	def test_chromium_executable_reads_chromium_dir(self, tmp_path):
+		"""When executable_path points to Chromium, list_chrome_profiles reads chromium directory."""
+		from browser_use.skill_cli.utils import list_chrome_profiles
+
+		# Create a fake Local State file under the chromium dir
+		chromium_dir = tmp_path / '.config' / 'chromium'
+		chromium_dir.mkdir(parents=True)
+		local_state = chromium_dir / 'Local State'
+		local_state.write_text('{"profile":{"info_cache":{"Profile 1":{"name":"Work"}}}}')
+
+		mock_home = tmp_path
+		with patch('browser_use.skill_cli.utils.platform.system', return_value='Linux'):
+			with patch.object(Path, 'home', return_value=mock_home):
+				profiles = list_chrome_profiles('/usr/bin/chromium')
+
+		assert len(profiles) == 1
+		assert profiles[0]['directory'] == 'Profile 1'
+		assert profiles[0]['name'] == 'Work'
+
+	def test_missing_local_state_returns_empty(self):
+		"""When Local State is missing, list_chrome_profiles returns an empty list."""
+		from browser_use.skill_cli.utils import list_chrome_profiles
+
+		# No Local State file anywhere
+		with patch('browser_use.skill_cli.utils.platform.system', return_value='Linux'):
+			with patch('browser_use.skill_cli.utils.get_chrome_profile_path') as mock_get_path:
+				mock_get_path.return_value = '/nonexistent'
+				profiles = list_chrome_profiles(None)
+
+		assert profiles == []

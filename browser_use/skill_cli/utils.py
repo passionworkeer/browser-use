@@ -180,7 +180,8 @@ def find_chrome_executable() -> str | None:
 
 	elif system == 'Linux':
 		# Linux: try common commands
-		for cmd in ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']:
+		# Prefer Chrome/Chromium first; Brave and Edge are supported but searched last
+		for cmd in ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'brave-browser', 'microsoft-edge']:
 			try:
 				result = subprocess.run(['which', cmd], capture_output=True, text=True)
 				if result.returncode == 0:
@@ -200,24 +201,6 @@ def find_chrome_executable() -> str | None:
 				return path
 
 	return None
-
-
-def _is_chromium_browser(executable_path: str | None) -> bool:
-	"""Check if the executable is a generic Chromium-based browser (not Google Chrome, Brave, or Edge).
-
-	On Linux, Chrome, Chromium, Brave, and Edge may all be installed. This function
-	determines whether the detected browser is generic Chromium (as opposed to Chrome),
-	so that the correct profile path can be selected. Brave and Edge are handled
-	separately via explicit mapping in get_chrome_profile_path().
-	"""
-	if not executable_path:
-		return False
-	# Check by executable name/path for Chromium-based browsers
-	# Note: Brave and Edge are handled explicitly in get_chrome_profile_path(),
-	# so they are NOT included here to avoid double-classification.
-	executable_lower = executable_path.lower()
-	chromium_names = ('chromium', 'chromium-browser')
-	return any(name in executable_lower for name in chromium_names)
 
 
 def get_chrome_profile_path(profile: str | None, executable_path: str | None = None) -> str | None:
@@ -244,7 +227,7 @@ def get_chrome_profile_path(profile: str | None, executable_path: str | None = N
 				exe_name = Path(executable_path).name.lower()
 				if 'brave' in exe_name:
 					return str(Path.home() / '.config' / 'BraveSoftware' / 'Brave-Browser')
-				if 'microsoft-edge' in exe_name or 'edge' in exe_name:
+				if 'microsoft-edge' in exe_name:
 					return str(Path.home() / '.config' / 'microsoft-edge')
 				if 'chromium' in exe_name:
 					return str(Path.home() / '.config' / 'chromium')
