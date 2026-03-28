@@ -726,11 +726,26 @@ class AgentHistoryList(BaseModel, Generic[AgentStructuredOutput]):
 			else:
 				h['model_output'] = None
 
+			# Handle result: normalize non-list to empty list
+			result = h.get('result')
+			if isinstance(result, list):
+				# Keep only dict items
+				h['result'] = [r for r in result if isinstance(r, dict)]
+			else:
+				h['result'] = []
+
 			# Handle state: normalize to empty dict if missing, None, or not a dict
 			h['state'] = h.get('state') or {}
 			if not isinstance(h['state'], dict):
 				h['state'] = {}
 			state = h['state']
+			# Fill in required fields with defaults if missing OR wrong type
+			if not isinstance(state.get('url'), str):
+				state['url'] = ''
+			if not isinstance(state.get('title'), str):
+				state['title'] = ''
+			if not isinstance(state.get('tabs'), list):
+				state['tabs'] = []
 			if 'interacted_element' not in state:
 				state['interacted_element'] = []
 
