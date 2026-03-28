@@ -253,11 +253,11 @@ def get_chrome_user_data_dirs() -> list[Path]:
 
 	if system == 'Darwin':
 		base = home / 'Library' / 'Application Support'
-		for name in ('Google/Chrome', 'Google/Chrome Canary', 'Chromium', 'BraveSoftware/Brave-Browser'):
+		for name in ('Google/Chrome', 'Google/Chrome Canary', 'Chromium', 'BraveSoftware/Brave-Browser', 'Microsoft Edge'):
 			candidates.append(base / name)
 	elif system == 'Linux':
 		base = home / '.config'
-		for name in ('google-chrome', 'google-chrome-unstable', 'chromium', 'BraveSoftware/Brave-Browser'):
+		for name in ('google-chrome', 'google-chrome-unstable', 'chromium', 'BraveSoftware/Brave-Browser', 'microsoft-edge'):
 			candidates.append(base / name)
 	elif system == 'Windows':
 		local_app_data = os.environ.get('LOCALAPPDATA', str(home / 'AppData' / 'Local'))
@@ -267,6 +267,7 @@ def get_chrome_user_data_dirs() -> list[Path]:
 			'Google\\Chrome SxS\\User Data',
 			'Chromium\\User Data',
 			'BraveSoftware\\Brave-Browser\\User Data',
+			'Microsoft\\Edge\\User Data',
 		):
 			candidates.append(base / name)
 

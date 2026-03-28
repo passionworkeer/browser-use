@@ -52,12 +52,14 @@ class TestGetChromeUserDataDirs:
 		assert '/home/user/.config/google-chrome' in normalized_checked
 		assert '/home/user/.config/chromium' in normalized_checked
 		assert '/home/user/.config/BraveSoftware/Brave-Browser' in normalized_checked
+		assert '/home/user/.config/microsoft-edge' in normalized_checked
 
 		# Only existing dirs should be in result
 		result_strs = [_normalize_path(p) for p in result]
 		assert '/home/user/.config/google-chrome' in result_strs
 		assert '/home/user/.config/chromium' in result_strs
 		assert '/home/user/.config/BraveSoftware/Brave-Browser' not in result_strs
+		assert '/home/user/.config/microsoft-edge' not in result_strs
 
 	def test_macos_returns_only_existing_dirs(self):
 		"""On macOS only existing directories under ~/Library/Application Support are returned."""
@@ -197,6 +199,7 @@ class TestFindChromeExecutableLinux:
 					type('MockResult', (), {'returncode': 1})(),
 				]
 				from browser_use.skill_cli.utils import find_chrome_executable
+
 				result = find_chrome_executable()
 		assert result == '/usr/bin/chromium'
 
@@ -212,6 +215,7 @@ class TestFindChromeExecutableLinux:
 					type('MockResult', (), {'returncode': 0, 'stdout': '/usr/bin/brave-browser'})(),  # brave-browser found
 				]
 				from browser_use.skill_cli.utils import find_chrome_executable
+
 				result = find_chrome_executable()
 		assert result == '/usr/bin/brave-browser'
 
@@ -228,6 +232,7 @@ class TestFindChromeExecutableLinux:
 					type('MockResult', (), {'returncode': 0, 'stdout': '/usr/bin/microsoft-edge'})(),  # microsoft-edge found
 				]
 				from browser_use.skill_cli.utils import find_chrome_executable
+
 				result = find_chrome_executable()
 		assert result == '/usr/bin/microsoft-edge'
 
@@ -244,6 +249,7 @@ class TestFindChromeExecutableLinux:
 					type('MockResult', (), {'returncode': 1})(),
 				]
 				from browser_use.skill_cli.utils import find_chrome_executable
+
 				result = find_chrome_executable()
 		assert result is None
 
@@ -301,3 +307,41 @@ class TestListChromeProfiles:
 				profiles = list_chrome_profiles(None)
 
 		assert profiles == []
+
+	def test_brave_executable_reads_brave_dir(self, tmp_path):
+		"""When executable_path points to Brave, list_chrome_profiles reads Brave's directory."""
+		from browser_use.skill_cli.utils import list_chrome_profiles
+
+		# Create a fake Local State file under the Brave directory
+		brave_dir = tmp_path / '.config' / 'BraveSoftware' / 'Brave-Browser'
+		brave_dir.mkdir(parents=True)
+		local_state = brave_dir / 'Local State'
+		local_state.write_text('{"profile":{"info_cache":{"Default":{"name":"Brave User"}}}}')
+
+		mock_home = tmp_path
+		with patch('browser_use.skill_cli.utils.platform.system', return_value='Linux'):
+			with patch.object(Path, 'home', return_value=mock_home):
+				profiles = list_chrome_profiles('/usr/bin/brave-browser')
+
+		assert len(profiles) == 1
+		assert profiles[0]['directory'] == 'Default'
+		assert profiles[0]['name'] == 'Brave User'
+
+	def test_edge_executable_reads_edge_dir(self, tmp_path):
+		"""When executable_path points to Microsoft Edge, list_chrome_profiles reads Edge's directory."""
+		from browser_use.skill_cli.utils import list_chrome_profiles
+
+		# Create a fake Local State file under the Edge directory
+		edge_dir = tmp_path / '.config' / 'microsoft-edge'
+		edge_dir.mkdir(parents=True)
+		local_state = edge_dir / 'Local State'
+		local_state.write_text('{"profile":{"info_cache":{"Profile 1":{"name":"Work"}}}}')
+
+		mock_home = tmp_path
+		with patch('browser_use.skill_cli.utils.platform.system', return_value='Linux'):
+			with patch.object(Path, 'home', return_value=mock_home):
+				profiles = list_chrome_profiles('/usr/bin/microsoft-edge')
+
+		assert len(profiles) == 1
+		assert profiles[0]['directory'] == 'Profile 1'
+		assert profiles[0]['name'] == 'Work'
