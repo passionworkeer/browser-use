@@ -761,7 +761,7 @@ def _handle_sessions(args: argparse.Namespace) -> int:
 	return 0
 
 
-def _handle_close_all(args: argparse.Namespace) -> int:
+	def _handle_close_all(args: argparse.Namespace) -> int:
 	"""Close all active sessions."""
 	home_dir = _get_home_dir()
 	# Snapshot the list first to avoid mutating during iteration
@@ -779,6 +779,35 @@ def _handle_close_all(args: argparse.Namespace) -> int:
 				closed += 1
 			except Exception:
 				pass
+		else:
+			# Daemon not alive but PID file remains - clean up orphan processes
+			try:
+				pid_text = pid_file.read_text().strip()
+				if pid_text:
+					pid = int(pid_text)
+					try:
+						if sys.platform == 'win32':
+							subprocess.run(['taskkill', '/F', '/PID', str(pid)], capture_output=True, timeout=5)
+						else:
+							os.kill(pid, 9)
+					except (ProcessLookupError, FileNotFoundError, subprocess.TimeoutExpired):
+						pass  # Process already gone
+				# Clean up stale socket file
+				socket_path = _get_socket_path(name)
+				if socket_path.exists():
+					socket_path.unlink(missing_ok=True)
+				# Remove the stale PID file
+				pid_file.unlink(missing_ok=True)
+				closed += 1
+			except Exception:
+				pass
+
+	# Also clean up any leftover temp profile directories from crashed sessions
+	temp_prof_dirs = list(Path(tempfile.gettempdir()).glob('browser-use-user-data-dir-*'))
+	if temp_prof_dirs:
+		import shutil
+		for tmp_prof in temp_prof_dirs:
+			shutil.rmtree(tmp_prof, ignore_errors=True)
 
 	if args.json:
 		print(json.dumps({'closed': closed}))
@@ -789,8 +818,6 @@ def _handle_close_all(args: argparse.Namespace) -> int:
 			print('No active sessions')
 
 	return 0
-
-
 def _migrate_legacy_files() -> None:
 	"""One-time cleanup of old daemon files and config migration."""
 	# Migrate config from old XDG location
