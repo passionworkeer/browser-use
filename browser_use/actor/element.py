@@ -272,14 +272,19 @@ class Element:
 				for mod in modifiers:
 					modifier_value |= modifier_map.get(mod, 0)
 
+			# Scale CSS pixel coordinates to device pixels for high-DPI displays
+			dpr = await self._browser_session._get_dpr(self._session_id)
+			x = int(center_x * dpr)
+			y = int(center_y * dpr)
+
 			# Perform the click using CDP
 			try:
 				# Move mouse to element
 				await self._client.send.Input.dispatchMouseEvent(
 					params={
 						'type': 'mouseMoved',
-						'x': center_x,
-						'y': center_y,
+						'x': x,
+						'y': y,
 					},
 					session_id=self._session_id,
 				)
@@ -291,8 +296,8 @@ class Element:
 						self._client.send.Input.dispatchMouseEvent(
 							params={
 								'type': 'mousePressed',
-								'x': center_x,
-								'y': center_y,
+								'x': x,
+								'y': y,
 								'button': button,
 								'clickCount': click_count,
 								'modifiers': modifier_value,
@@ -311,8 +316,8 @@ class Element:
 						self._client.send.Input.dispatchMouseEvent(
 							params={
 								'type': 'mouseReleased',
-								'x': center_x,
-								'y': center_y,
+								'x': x,
+								'y': y,
 								'button': button,
 								'clickCount': click_count,
 								'modifiers': modifier_value,
@@ -512,8 +517,9 @@ class Element:
 		if not box:
 			raise RuntimeError('Element is not visible or has no bounding box')
 
-		x = box['x'] + box['width'] / 2
-		y = box['y'] + box['height'] / 2
+		dpr = await self._browser_session._get_dpr(self._session_id)
+		x = int((box['x'] + box['width'] / 2) * dpr)
+		y = int((box['y'] + box['height'] / 2) * dpr)
 
 		params: 'DispatchMouseEventParameters' = {'type': 'mouseMoved', 'x': x, 'y': y}
 		await self._client.send.Input.dispatchMouseEvent(params, session_id=self._session_id)
@@ -622,18 +628,24 @@ class Element:
 				target_y = target_box['y'] + target_box['height'] / 2
 
 		# Perform drag operation
+		dpr = await self._browser_session._get_dpr(self._session_id)
+		sx = int(source_x * dpr)
+		sy = int(source_y * dpr)
+		tx = int(target_x * dpr)
+		ty = int(target_y * dpr)
+
 		await self._client.send.Input.dispatchMouseEvent(
-			{'type': 'mousePressed', 'x': source_x, 'y': source_y, 'button': 'left'},
+			{'type': 'mousePressed', 'x': sx, 'y': sy, 'button': 'left'},
 			session_id=self._session_id,
 		)
 
 		await self._client.send.Input.dispatchMouseEvent(
-			{'type': 'mouseMoved', 'x': target_x, 'y': target_y},
+			{'type': 'mouseMoved', 'x': tx, 'y': ty},
 			session_id=self._session_id,
 		)
 
 		await self._client.send.Input.dispatchMouseEvent(
-			{'type': 'mouseReleased', 'x': target_x, 'y': target_y, 'button': 'left'},
+			{'type': 'mouseReleased', 'x': tx, 'y': ty, 'button': 'left'},
 			session_id=self._session_id,
 		)
 
@@ -1019,12 +1031,16 @@ class Element:
 				center_x = bounds['x'] + bounds['width'] / 2
 				center_y = bounds['y'] + bounds['height'] / 2
 
+				# Scale CSS pixels to device pixels for high-DPI displays
+				dpr = await self._browser_session._get_dpr(session_id)
+				x = int(center_x * dpr)
+				y = int(center_y * dpr)
 				# Triple-click to select all text
 				await cdp_client.send.Input.dispatchMouseEvent(
 					params={
 						'type': 'mousePressed',
-						'x': center_x,
-						'y': center_y,
+						'x': x,
+						'y': y,
 						'button': 'left',
 						'clickCount': 3,
 					},
@@ -1033,8 +1049,8 @@ class Element:
 				await cdp_client.send.Input.dispatchMouseEvent(
 					params={
 						'type': 'mouseReleased',
-						'x': center_x,
-						'y': center_y,
+						'x': x,
+						'y': y,
 						'button': 'left',
 						'clickCount': 3,
 					},
@@ -1104,12 +1120,17 @@ class Element:
 				center_x = input_coordinates['input_x']
 				center_y = input_coordinates['input_y']
 
+				# Scale CSS pixels to device pixels for high-DPI displays
+				dpr = await self._browser_session._get_dpr(session_id)
+				x = int(center_x * dpr)
+				y = int(center_y * dpr)
+
 				# Click on the element to focus it
 				await cdp_client.send.Input.dispatchMouseEvent(
 					params={
 						'type': 'mousePressed',
-						'x': center_x,
-						'y': center_y,
+						'x': x,
+						'y': y,
 						'button': 'left',
 						'clickCount': 1,
 					},
@@ -1118,8 +1139,8 @@ class Element:
 				await cdp_client.send.Input.dispatchMouseEvent(
 					params={
 						'type': 'mouseReleased',
-						'x': center_x,
-						'y': center_y,
+						'x': x,
+						'y': y,
 						'button': 'left',
 						'clickCount': 1,
 					},

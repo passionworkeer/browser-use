@@ -20,6 +20,10 @@ class Mouse:
 
 	async def click(self, x: int, y: int, button: 'MouseButton' = 'left', click_count: int = 1) -> None:
 		"""Click at the specified coordinates."""
+		dpr = await self._browser_session._get_dpr(self._session_id)
+		x = int(x * dpr)
+		y = int(y * dpr)
+
 		# Mouse press
 		press_params: 'DispatchMouseEventParameters' = {
 			'type': 'mousePressed',
@@ -79,6 +83,10 @@ class Mouse:
 		# TODO: Implement smooth movement with multiple steps if needed
 		_ = steps  # Acknowledge parameter for future use
 
+		dpr = await self._browser_session._get_dpr(self._session_id)
+		x = int(x * dpr)
+		y = int(y * dpr)
+
 		params: 'DispatchMouseEventParameters' = {'type': 'mouseMoved', 'x': x, 'y': y}
 		await self._client.send.Input.dispatchMouseEvent(params, session_id=self._session_id)
 
@@ -87,6 +95,8 @@ class Mouse:
 		if not self._session_id:
 			raise RuntimeError('Session ID is required for scroll operations')
 
+		dpr = await self._browser_session._get_dpr(self._session_id)
+
 		# Method 1: Try mouse wheel event (most reliable)
 		try:
 			# Get viewport dimensions
@@ -94,9 +104,9 @@ class Mouse:
 			viewport_width = layout_metrics['layoutViewport']['clientWidth']
 			viewport_height = layout_metrics['layoutViewport']['clientHeight']
 
-			# Use provided coordinates or center of viewport
-			scroll_x = x if x > 0 else viewport_width / 2
-			scroll_y = y if y > 0 else viewport_height / 2
+			# Use provided coordinates or center of viewport (CSS pixels -> device pixels)
+			scroll_x = int((x if x > 0 else viewport_width / 2) * dpr)
+			scroll_y = int((y if y > 0 else viewport_height / 2) * dpr)
 
 			# Calculate scroll deltas (positive = down/right)
 			scroll_delta_x = delta_x or 0

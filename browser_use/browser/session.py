@@ -527,6 +527,7 @@ class BrowserSession(BaseModel):
 	_screenshot_watchdog: Any | None = PrivateAttr(default=None)
 	_permissions_watchdog: Any | None = PrivateAttr(default=None)
 	_recording_watchdog: Any | None = PrivateAttr(default=None)
+	_cached_dpr: float = PrivateAttr(default=1.0)
 	_captcha_watchdog: Any | None = PrivateAttr(default=None)
 	_watchdogs_attached: bool = PrivateAttr(default=False)
 
@@ -3355,6 +3356,35 @@ class BrowserSession(BaseModel):
 		await cdp_session.cdp_client.send.Page.removeScriptToEvaluateOnNewDocument(
 			params={'identifier': identifier}, session_id=cdp_session.session_id
 		)
+
+	async def _get_dpr(self, session_id: str | None = None) -> float:
+		"""Get cached device pixel ratio from CDP.
+
+		On Windows high-DPI displays, CDP returns CSS pixel coordinates but
+		Input.dispatchMouseEvent expects device pixels. This method returns
+		the DPR so callers can scale coordinates accordingly.
+		"""
+		if self._cached_dpr != 1.0:
+			return self._cached_dpr
+
+		try:
+			cdp_session = await self.get_or_create_cdp_session(target_id=None)
+			sid = session_id or cdp_session.session_id
+			metrics = await cdp_session.cdp_client.send.Page.getLayoutMetrics(session_id=sid)
+			visual_viewport = metrics.get('visualViewport', {})
+			css_visual_viewport = metrics.get('cssVisualViewport', {})
+			css_layout_viewport = metrics.get('cssLayoutViewport', {})
+			css_width = css_visual_viewport.get('clientWidth', css_layout_viewport.get('clientWidth', 1280.0))
+			device_width = visual_viewport.get('clientWidth', css_width)
+			if css_width > 0:
+				self._cached_dpr = device_width / css_width
+			return self._cached_dpr
+		except Exception:
+			return 1.0
+
+	def _invalidate_dpr_cache(self) -> None:
+		"""Invalidate DPR cache when page navigates or viewport changes."""
+		self._cached_dpr = 1.0
 
 	async def _cdp_set_viewport(
 		self, width: int, height: int, device_scale_factor: float = 1.0, mobile: bool = False, target_id: str | None = None
