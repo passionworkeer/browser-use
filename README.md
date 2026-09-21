@@ -1,3 +1,5 @@
+> **Fork status (2026-09-21): publicly archived.** This fork is retained as a historical snapshot and is no longer maintained or synchronized. The upstream project continues separately at [browser-use/browser-use](https://github.com/browser-use/browser-use); use upstream for current code, documentation, and contributions. This archived fork does not accept issues or pull requests. The original README and license are preserved below.
+
 <picture>
   <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/2ccdb752-22fb-41c7-8948-857fc1ad7e24">
   <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/774a46d5-27a0-490c-b7d0-e65fcbbfa358">
